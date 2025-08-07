@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Grocery Receipt Scanner</title>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.1/dist/tesseract.min.js"></script>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #f9f9f9;
+      margin: 0;
+      padding: 20px;
+      color: #333;
+    }
+
+    h1 {
+      text-align: center;
+      color: #4CAF50;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      display: flex;
+      gap: 30px;
+      flex-wrap: wrap;
+    }
+
+    .box {
+      flex: 1;
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px #ccc;
+      min-width: 300px;
+    }
+
+    textarea {
+      width: 100%;
+      height: 200px;
+      font-size: 16px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+    }
+
+    input[type="file"] {
+      margin-bottom: 10px;
+    }
+
+    button {
+      margin-top: 10px;
+      padding: 10px 15px;
+      font-size: 16px;
+      border: none;
+      background-color: #4CAF50;
+      color: white;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    .history {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .receipt-entry {
+      margin-bottom: 15px;
+      padding: 10px;
+      border: 1px dashed #aaa;
+      border-radius: 8px;
+      background: #fafafa;
+    }
+
+    .receipt-entry h4 {
+      margin: 0 0 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🛒 Grocery Receipt Scanner</h1>
+
+  <div class="container">
+    <div class="box">
+      <h2>Scan Receipt</h2>
+      <input type="file" id="imageInput" accept="image/*" />
+      <button onclick="scanImage()">Scan Receipt</button>
+      <textarea id="receiptText" placeholder="Receipt text will appear here..."></textarea>
+      <button onclick="analyzeText()">Analyze & Save</button>
+    </div>
+
+    <div class="box history">
+      <h2>📜 History</h2>
+      <div id="historyList"></div>
+    </div>
+  </div>
+
+  <script>
+    const imageInput = document.getElementById("imageInput");
+    const receiptText = document.getElementById("receiptText");
+    const historyList = document.getElementById("historyList");
+
+    function scanImage() {
+      const file = imageInput.files[0];
+      if (!file) return alert("Please select an image!");
+
+      Tesseract.recognize(
+        file,
+        "eng",
+        { logger: (m) => console.log(m) }
+      ).then(({ data: { text } }) => {
+        receiptText.value = text;
+      });
+    }
+
+    function analyzeText() {
+      const text = receiptText.value.trim();
+      if (!text) return alert("No text to analyze!");
+
+      const lines = text.split("\n");
+      const items = [];
+      let total = 0;
+
+      for (let line of lines) {
+        const match = line.match(/(.+?)\s+(?:Rs\.?\s*)?(\d+[\.,]?\d*)$/i);
+        if (match) {
+          const name = match[1].trim();
+          const price = parseFloat(match[2].replace(",", ""));
+          items.push({ name, price });
+          total += price;
+        }
+      }
+
+      if (items.length === 0) {
+        alert("No items with prices found.");
+        return;
+      }
+
+      const entry = {
+        date: new Date().toLocaleString(),
+        items,
+        total: total.toFixed(2),
+      };
+
+      // Save to localStorage
+      const history = JSON.parse(localStorage.getItem("groceryHistory")) || [];
+      history.unshift(entry);
+      localStorage.setItem("groceryHistory", JSON.stringify(history));
+
+      // Send to Google Sheets
+      fetch("https://script.google.com/macros/s/AKfycbyUiA4OD6IEFPQXoYewr-caQ6gmSXFfEyRItrO4x--3/exec", {
+        method: "POST",
+        body: JSON.stringify(entry),
+        headers: {
+          "Content-Type": "application/json"
+        }
+      })
+      .then(res => {
+        if (res.ok) alert("Saved to Google Sheets!");
+        else alert("Failed to send to Google Sheets.");
+      })
+      .catch(err => {
+        console.error(err);
+        alert("Error sending to Google Sheets.");
+      });
+
+      showHistory();
+    }
+
+    function showHistory() {
+      const history = JSON.parse(localStorage.getItem("groceryHistory")) || [];
+      historyList.innerHTML = "";
+
+      if (history.length === 0) {
+        historyList.innerHTML = "<p>No receipts saved yet.</p>";
+        return;
+      }
+
+      history.forEach((entry) => {
+        const div = document.createElement("div");
+        div.className = "receipt-entry";
+        div.innerHTML = `
+          <h4>🗓 ${entry.date}</h4>
+          <ul>
+            ${entry.items.map(item => `<li>${item.name}: Rs ${item.price}</li>`).join("")}
+          </ul>
+          <strong>Total: Rs ${entry.total}</strong>
+        `;
+        historyList.appendChild(div);
+      });
+    }
+
+    showHistory();
+  </script>
+</body>
+</html>
